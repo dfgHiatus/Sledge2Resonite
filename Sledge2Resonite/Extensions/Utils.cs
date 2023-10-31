@@ -8,8 +8,9 @@ using System.Numerics;
 
 public static class Utils
 {
-    private static float OO_SQRT_3 = 0.57735025882720947f;
-    static Vector3[] bumpBasisTranspose = new Vector3[]{
+    private const float OO_SQRT_3 = 0.57735025882720947f;
+
+    private static readonly Vector3[] bumpBasisTranspose = new Vector3[]{
         new Vector3( 0.81649661064147949f, -0.40824833512306213f, -0.40824833512306213f ),
         new Vector3(  0.0f, 0.70710676908493042f, -0.7071068286895752f ),
         new Vector3(  OO_SQRT_3, OO_SQRT_3, OO_SQRT_3 )
@@ -18,7 +19,7 @@ public static class Utils
     internal static string DivideNumbersBy255(string input)
     {
         // Create a regular expression pattern to match numbers in the input string
-        string pattern = @"-?\d+\.?\d*";
+        const string pattern = @"-?\d+\.?\d*";
 
         // Create a Regex object to match the pattern
         Regex regex = new Regex(pattern);
@@ -53,16 +54,9 @@ public static class Utils
         str = Regex.Replace(str, magic2, ";");
 
         // float3 parse expected string format: "[0;0;0]"
-        if (str.Contains("."))
-        {
-            parsed = str;
-            return true;
-        }
-        else
-        {
-            parsed = DivideNumbersBy255(str);
-            return true;
-        }
+        parsed = str.Contains(".") ? str : DivideNumbersBy255(str);
+
+        return true;
     }
 
     internal static string MergeTextureNameAndPath(string textureName, string materialPath)

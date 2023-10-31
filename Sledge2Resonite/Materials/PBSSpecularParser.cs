@@ -93,24 +93,12 @@ public abstract class PBSSpecularParser
         foreach (KeyValuePair<string, string> currentProperty in properties)
         {
             if (!propertyTextureNamesHashSet.Contains(currentProperty.Key))
-            {
                 continue;
-            }
 
-            // Get texture name and try to grab it from dictionary
             string currentTextureName = currentProperty.Value.Split('/').Last();
             if (!Sledge2Resonite.vtfDictionary.TryGetValue(currentTextureName, out VtfFile currentVtf))
-            {
-                UniLog.Error($"Texture was not found in dictionary with name {currentTextureName}");
-                foreach (var types in Sledge2Resonite.vtfDictionary)
-                {
-                    UniLog.Log(types.Key + ", " + types.Value);
-                }
-
                 continue;
-            }
 
-            // VTF contains mip-maps, but we only care about the last original image
             VtfImage currentVtfImage = currentVtf.Images.GetLast();
             var newBitmap = new Bitmap2D(currentVtfImage.GetBgra32Data(), currentVtfImage.Width, currentVtfImage.Height, TextureFormat.BGRA32, false, ColorProfile.Linear, false);
             await default(ToWorld);
@@ -183,158 +171,148 @@ public abstract class PBSSpecularParser
 
     private async Task<PBS_Specular> CreateSpecularMapFromAlbedoMap(PBS_Specular currentMaterial, Dictionary<string, string> propertiesDictionary, Slot currentSlot)
     {
-        // Handle specular map in albedo alpha channel
-        if (propertiesDictionary.TryGetValue("$basealphaenvmapmask", out string hasAblbedoSpecular) &&
-            propertiesDictionary.TryGetValue("$basetexture", out string specularAlbedoInsideAlpha))
-        {
-            if (hasAblbedoSpecular == "1")
-            {
-                string currentAlbedoName = specularAlbedoInsideAlpha.Split('/').Last();
-                if (Sledge2Resonite.vtfDictionary.TryGetValue(currentAlbedoName, out VtfFile tempAlbedoBitmap2D))
-                {
-                    // Copy texture and invert alpha channel for specular
-                    await default(ToBackground);
-                    var albMap = tempAlbedoBitmap2D.Images.GetLast();
-                    var albMapRaw = albMap.GetBgra32Data();
-                    var newSpecularBitmap = new Bitmap2D(
-                        albMapRaw,
-                        albMap.Width,
-                        albMap.Height,
-                        TextureFormat.BGRA32,
-                        false, 
-                        ColorProfile.Linear, 
-                        false);
+        if (!propertiesDictionary.TryGetValue("$basealphaenvmapmask", out string hasAblbedoSpecular) ||
+            !propertiesDictionary.TryGetValue("$basetexture", out string specularAlbedoInsideAlpha))
+            return currentMaterial;
 
-                    // Wait for the world to catch up
-                    await default(ToWorld);
-                    StaticTexture2D finalTexture = currentSlot.AttachComponent<StaticTexture2D>();
-                    finalTexture.URL.Value = await currentSlot.World.Engine.LocalDB.SaveAssetAsync(newSpecularBitmap);
-                    currentMaterial.SpecularMap.Target = finalTexture;
-                }
-            }
-        }
+        if (hasAblbedoSpecular != "1")
+            return currentMaterial;
+
+        string currentAlbedoName = specularAlbedoInsideAlpha.Split('/').Last();
+        if (!Sledge2Resonite.vtfDictionary.TryGetValue(currentAlbedoName, out VtfFile tempAlbedoBitmap2D))
+            return currentMaterial;
+        
+        await default(ToBackground);
+        var albMap = tempAlbedoBitmap2D.Images.GetLast();
+        var albMapRaw = albMap.GetBgra32Data();
+        var newSpecularBitmap = new Bitmap2D(
+            albMapRaw,
+            albMap.Width,
+            albMap.Height,
+            TextureFormat.BGRA32,
+            false,
+            ColorProfile.Linear,
+            false);
+
+        await default(ToWorld);
+        StaticTexture2D finalTexture = currentSlot.AttachComponent<StaticTexture2D>();
+        finalTexture.URL.Value = await currentSlot.World.Engine.LocalDB.SaveAssetAsync(newSpecularBitmap);
+        currentMaterial.SpecularMap.Target = finalTexture;
 
         return currentMaterial;
     }
 
     private async Task<PBS_Specular> CreateSpecularFromSpecularMap(PBS_Specular currentMaterial, Dictionary<string, string> propertiesDictionary, Slot currentSlot)
     {
-        if (propertiesDictionary.TryGetValue("$envmapmask", out string currentEnvmapmask) &&
-                    propertiesDictionary.TryGetValue("$basetexture", out string specularAlbedo))
+        if (!propertiesDictionary.TryGetValue("$envmapmask", out string currentEnvmapmask) ||
+            !propertiesDictionary.TryGetValue("$basetexture", out string specularAlbedo))
+            return currentMaterial;
+
+        string currentEnvmapmaskName = currentEnvmapmask.Split('/').Last();
+        string currentAlbedoName = specularAlbedo.Split('/').Last();
+
+        if (!Sledge2Resonite.vtfDictionary.TryGetValue(currentEnvmapmaskName, out var tempEnvMapBitmap2D) ||
+            !Sledge2Resonite.vtfDictionary.TryGetValue(currentAlbedoName, out var tempAlbedoBitmap2D))
+            return currentMaterial;
+        
+        await default(ToBackground);
+        var albMap = tempAlbedoBitmap2D.Images.GetLast();
+        var envMap = tempEnvMapBitmap2D.Images.GetLast();
+        var albMapModified = albMap.GetBgra32Data();
+        var envMapModified = envMap.GetBgra32Data();
+        for (int x = 0; x < envMapModified.Length; x += 4)
         {
-            string currentEnvmapmaskName = currentEnvmapmask.Split('/').Last();
-            string currentAlbedoName = specularAlbedo.Split('/').Last();
+            envMapModified[x + 3] = (byte) // A
+                ((envMapModified[x] + // B
+                envMapModified[x + 1] + // G
+                envMapModified[x + 2]) / 3); // R
 
-            if (Sledge2Resonite.vtfDictionary.TryGetValue(currentEnvmapmaskName, out var tempEnvMapBitmap2D) &&
-                Sledge2Resonite.vtfDictionary.TryGetValue(currentAlbedoName, out var tempAlbedoBitmap2D))
-            {
-                await default(ToBackground);
-                var albMap = tempAlbedoBitmap2D.Images.GetLast();
-                var envMap = tempEnvMapBitmap2D.Images.GetLast();
-                var albMapModified = albMap.GetBgra32Data();
-                var envMapModified = envMap.GetBgra32Data();
-                for (int x = 0; x < envMapModified.Length; x += 4)
-                {
-                    envMapModified[x + 3] = (byte) // A
-                        ((envMapModified[x] + // B
-                        envMapModified[x + 1] + // G
-                        envMapModified[x + 2]) / 3); // R
-
-                    envMapModified[x] = albMapModified[x]; // B
-                    envMapModified[x + 1] = albMapModified[x + 1]; // G
-                    envMapModified[x + 2] = albMapModified[x + 2]; // R
-                }
-
-                // Create new specular bitmap from merging into albedo
-                var finalMap = CreateSpecularByAlphaTransfer(
-                    new Bitmap2D(albMapModified, albMap.Width, albMap.Height, TextureFormat.BGRA32, false, ColorProfile.Linear, false),
-                    new Bitmap2D(envMapModified, envMap.Width, envMap.Height, TextureFormat.BGRA32, false, ColorProfile.Linear, false));
-
-                // Create new specular texture asset and assign
-                await default(ToWorld);
-                StaticTexture2D finalTexture = currentSlot.AttachComponent<StaticTexture2D>();
-                finalTexture.URL.Value = await currentSlot.World.Engine.LocalDB.SaveAssetAsync(finalMap);
-                currentMaterial.SpecularMap.Target = finalTexture;
-                await default(ToBackground);
-            }
+            envMapModified[x] = albMapModified[x]; // B
+            envMapModified[x + 1] = albMapModified[x + 1]; // G
+            envMapModified[x + 2] = albMapModified[x + 2]; // R
         }
+
+        // Create new specular bitmap from merging into albedo
+        var finalMap = CreateSpecularByAlphaTransfer(
+            new Bitmap2D(albMapModified, albMap.Width, albMap.Height, TextureFormat.BGRA32, false, ColorProfile.Linear, false),
+            new Bitmap2D(envMapModified, envMap.Width, envMap.Height, TextureFormat.BGRA32, false, ColorProfile.Linear, false));
+
+        // Create new specular texture asset and assign
+        await default(ToWorld);
+        StaticTexture2D finalTexture = currentSlot.AttachComponent<StaticTexture2D>();
+        finalTexture.URL.Value = await currentSlot.World.Engine.LocalDB.SaveAssetAsync(finalMap);
+        currentMaterial.SpecularMap.Target = finalTexture;
+        await default(ToBackground);
 
         return currentMaterial;
     }
 
     private async Task<PBS_Specular> CreateSpecularFromNormalMap(PBS_Specular currentMaterial, Dictionary<string, string> propertiesDictionary, Slot currentSlot, Bitmap2D normalmapBitmap)
     {
-        // Handle specular texture in normal map
-        if (propertiesDictionary.TryGetValue("$normalmapalphaenvmapmask", out string hasNormalmapSpecular) &&
-            propertiesDictionary.TryGetValue("$basetexture", out string specularAlbedoForNormalmap))
-        {
-            if (hasNormalmapSpecular == "1" && normalmapBitmap != null)
-            {
-                UniLog.Log("got specular in normalmap alpha channel");
-                string currentAlbedoName = specularAlbedoForNormalmap.Split('/').Last();
-                if (Sledge2Resonite.vtfDictionary.TryGetValue(currentAlbedoName, out var tempAlbedoBitmap2D))
-                {
-                    await default(ToBackground);
+        if (!propertiesDictionary.TryGetValue("$normalmapalphaenvmapmask", out string hasNormalmapSpecular) ||
+            !propertiesDictionary.TryGetValue("$basetexture", out string specularAlbedoForNormalmap))
+            return currentMaterial;
 
-                    // Copy texture and invert alpha channel for specular
-                    var albMap = tempAlbedoBitmap2D.Images.GetLast();
-                    var albMapRaw = albMap.GetBgra32Data();
+        if (hasNormalmapSpecular != "1" || normalmapBitmap == null)
+            return currentMaterial;
 
-                    // Create new specular bitmap from copying the normalmap alpha into the albedo alpha
-                    var finalMap = CreateSpecularByAlphaTransfer(new Bitmap2D(albMapRaw, albMap.Width, albMap.Height, TextureFormat.BGRA32, false, ColorProfile.Linear, false), normalmapBitmap);
+        string currentAlbedoName = specularAlbedoForNormalmap.Split('/').Last();
+        if (!Sledge2Resonite.vtfDictionary.TryGetValue(currentAlbedoName, out var tempAlbedoBitmap2D))
+            return currentMaterial;
+        
+        await default(ToBackground);
 
-                    // Wait for the world to catch up
-                    await default(ToWorld);
-                    StaticTexture2D finalTexture = currentSlot.AttachComponent<StaticTexture2D>();
-                    finalTexture.URL.Value = await currentSlot.World.Engine.LocalDB.SaveAssetAsync(finalMap);
-                    currentMaterial.SpecularMap.Target = finalTexture;
-                    await default(ToBackground);
-                }
-                else
-                {
-                    UniLog.Error($"Couldn't find albedo texture: {currentAlbedoName}");
-                }
-            }
-        }
+        // Copy texture and invert alpha channel for specular
+        var albMap = tempAlbedoBitmap2D.Images.GetLast();
+        var albMapRaw = albMap.GetBgra32Data();
+
+        // Create new specular bitmap from copying the normalmap alpha into the albedo alpha
+        var finalMap = CreateSpecularByAlphaTransfer(new Bitmap2D(albMapRaw, albMap.Width, albMap.Height, TextureFormat.BGRA32, false, ColorProfile.Linear, false), normalmapBitmap);
+
+        // Wait for the world to catch up
+        await default(ToWorld);
+        StaticTexture2D finalTexture = currentSlot.AttachComponent<StaticTexture2D>();
+        finalTexture.URL.Value = await currentSlot.World.Engine.LocalDB.SaveAssetAsync(finalMap);
+        currentMaterial.SpecularMap.Target = finalTexture;
+        await default(ToBackground);
 
         return currentMaterial;
     }
 
     private async Task<PBS_Specular> SetAlphaBlend(PBS_Specular currentMaterial, Dictionary<string, string> propertiesDictionary)
     {
-        if (propertiesDictionary.TryGetValue("$translucent", out string hasAlphaBlend))
-        {
-            UniLog.Log("alphablend: " + hasAlphaBlend);
-            if (hasAlphaBlend == "1")
-            {
-                await default(ToWorld);
-                currentMaterial.BlendMode.Value = BlendMode.Alpha;
-                await default(ToBackground);
-            }
-        }
+        if (!propertiesDictionary.TryGetValue("$translucent", out string hasAlphaBlend))
+            return currentMaterial;
+
+        if (hasAlphaBlend != "1")
+            return currentMaterial;
+        
+        await default(ToWorld);
+        currentMaterial.BlendMode.Value = BlendMode.Alpha;
+        await default(ToBackground);
 
         return currentMaterial;
     }
 
     private async Task<PBS_Specular> SetAlphaClip(PBS_Specular currentMaterial, Dictionary<string, string> propertiesDictionary)
     {
-        if (propertiesDictionary.TryGetValue("$alphatest", out string hasAlphaClip))
-        {
-            if (hasAlphaClip == "1")
-            {
-                await default(ToWorld);
-                currentMaterial.BlendMode.Value = BlendMode.Cutout;
-                await default(ToBackground);
+        if (!propertiesDictionary.TryGetValue("$alphatest", out string hasAlphaClip))
+            return currentMaterial;
 
-                if (propertiesDictionary.TryGetValue("$alphatestreference", out string alphaCutOff) &&
-                    float.TryParse(alphaCutOff, NumberStyles.Number, CultureInfo.InvariantCulture, out float parsed))
-                {
-                    await default(ToWorld);
-                    currentMaterial.AlphaCutoff.Value = parsed;
-                    await default(ToBackground);
-                }
-            }
-        }
+        if (hasAlphaClip != "1")
+            return currentMaterial;
+
+        await default(ToWorld);
+        currentMaterial.BlendMode.Value = BlendMode.Cutout;
+        await default(ToBackground);
+
+        if (!propertiesDictionary.TryGetValue("$alphatestreference", out string alphaCutOff) ||
+            !float.TryParse(alphaCutOff, NumberStyles.Number, CultureInfo.InvariantCulture, out float parsed))
+            return currentMaterial;
+        
+        await default(ToWorld);
+        currentMaterial.AlphaCutoff.Value = parsed;
+        await default(ToBackground);
 
         return currentMaterial;
     }
@@ -342,48 +320,45 @@ public abstract class PBSSpecularParser
     private async Task<PBS_Specular> CreateEmissionMap(PBS_Specular currentMaterial, Dictionary<string, string> propertiesDictionary, Slot currentSlot)
     {
         // Create emission texture 
-        if (propertiesDictionary.TryGetValue("$selfillum", out string currentSelfIllum) &&
-            propertiesDictionary.TryGetValue("$basetexture", out string emissionAlbedo))
-        {
-            string emissonAlbedoName = emissionAlbedo.Split('/').Last();
-            if (currentSelfIllum == "1" &&
-                Sledge2Resonite.vtfDictionary.TryGetValue(emissonAlbedoName, out var tempAlbedoBitmap2D))
-            {
-                await default(ToBackground);
+        if (!propertiesDictionary.TryGetValue("$selfillum", out string currentSelfIllum) ||
+            !propertiesDictionary.TryGetValue("$basetexture", out string emissionAlbedo))
+            return currentMaterial;
 
-                // Add new emission texture to world and tint background black
-                var albMap = tempAlbedoBitmap2D.Images.GetLast();
-                var albMapRaw = albMap.GetBgra32Data();
-                var newEmission = new Bitmap2D(albMapRaw, albMap.Width, albMap.Height, TextureFormat.BGRA32, false, ColorProfile.Linear, false);
+        string emissonAlbedoName = emissionAlbedo.Split('/').Last();
+        if (currentSelfIllum != "1" ||
+            !Sledge2Resonite.vtfDictionary.TryGetValue(emissonAlbedoName, out var tempAlbedoBitmap2D))
+            return currentMaterial;
 
-                // Assign to material
-                await default(ToWorld);
-                StaticTexture2D emissionTexture = currentSlot.AttachComponent<StaticTexture2D>();
-                emissionTexture.URL.Value = await currentSlot.World.Engine.LocalDB.SaveAssetAsync(newEmission);
-                await emissionTexture.ProcessPixels(c => color.AlphaBlend(c, color.Black));
-                currentMaterial.EmissiveMap.Target = emissionTexture;
-                await default(ToBackground);
+        await default(ToBackground);
 
-                // set emission color
-                await SetEmissionColor(currentMaterial, propertiesDictionary);
-            }
-        }
+        var albMap = tempAlbedoBitmap2D.Images.GetLast();
+        var albMapRaw = albMap.GetBgra32Data();
+        var newEmission = new Bitmap2D(albMapRaw, albMap.Width, albMap.Height, TextureFormat.BGRA32, false, ColorProfile.Linear, false);
+
+        await default(ToWorld);
+        StaticTexture2D emissionTexture = currentSlot.AttachComponent<StaticTexture2D>();
+        emissionTexture.URL.Value = await currentSlot.World.Engine.LocalDB.SaveAssetAsync(newEmission);
+        await emissionTexture.ProcessPixels(c => color.AlphaBlend(c, color.Black));
+        currentMaterial.EmissiveMap.Target = emissionTexture;
+        await default(ToBackground);
+
+        await SetEmissionColor(currentMaterial, propertiesDictionary);
 
         return currentMaterial;
     }
 
     private async Task<PBS_Specular> SetAlbedoColor(PBS_Specular currentMaterial, Dictionary<string, string> propertiesDictionary)
     {
-        if (propertiesDictionary.TryGetValue("$color", out string currentAlbedoTint))
+        if (!propertiesDictionary.TryGetValue("$color", out string currentAlbedoTint))
+            return currentMaterial;
+        
+        if (Float3Extensions.GetFloat3FromString(currentAlbedoTint, out float3 val))
         {
-            if (Float3Extensions.GetFloat3FromString(currentAlbedoTint, out float3 val))
-            {
-                await default(ToWorld);
-                currentMaterial.AlbedoColor.Value = new colorX(new float4(val.x, val.y, val.z, 1));
-                await default(ToBackground);
-            }
+            await default(ToWorld);
+            currentMaterial.AlbedoColor.Value = new colorX(new float4(val.x, val.y, val.z, 1));
+            await default(ToBackground);
         }
-
+        
         return currentMaterial;
     }
 
@@ -391,16 +366,11 @@ public abstract class PBSSpecularParser
     {
         if (propertiesDictionary.TryGetValue("$selfillumtint", out string currentSelfIllumTint))
         {
-            UniLog.Log("emission color tint: " + currentSelfIllumTint);
             if (Float3Extensions.GetFloat3FromString(currentSelfIllumTint, out float3 val))
             {
                 await default(ToWorld);
                 currentMaterial.EmissiveColor.Value = new colorX(new float4(val.x, val.y, val.z, 1));
                 await default(ToBackground);
-            }
-            else
-            {
-                UniLog.Error("Failed to parse float3 with " + val);
             }
         }
         else
@@ -415,36 +385,27 @@ public abstract class PBSSpecularParser
 
     private async Task<PBS_Specular> SetSpecularColor(PBS_Specular currentMaterial, Dictionary<string, string> propertiesDictionary)
     {
-        if (propertiesDictionary.TryGetValue("$envmaptint", out string currentSpecularTint))
+        if (!propertiesDictionary.TryGetValue("$envmaptint", out string currentSpecularTint))
+            return currentMaterial;
+
+        if (Float3Extensions.GetFloat3FromString(currentSpecularTint, out float3 tint))
         {
-            UniLog.Log("Specular color tint: " + currentSpecularTint);
-            if (Float3Extensions.GetFloat3FromString(currentSpecularTint, out float3 tint))
-            {
-                await default(ToWorld);
-                currentMaterial.SpecularColor.Value = new colorX(new float4(tint.x, tint.y, tint.z, 1));
-                await default(ToBackground);
-            }
-            else
-            {
-                UniLog.Error("Failed to parse float3 with " + tint);
-            }
+            await default(ToWorld);
+            currentMaterial.SpecularColor.Value = new colorX(new float4(tint.x, tint.y, tint.z, 1));
+            await default(ToBackground);
         }
 
         return currentMaterial;
     }
-
-    // TODO Test
+    
     private async Task<PBS_Specular> SetSpecularMapTint(PBS_Specular currentMaterial, Dictionary<string, string> propertiesDictionary, Slot currentSlot)
     {
         if (!Sledge2Resonite.config.GetValue(Sledge2Resonite.tintSpecular))
-        {
             return currentMaterial;
-        }
 
         colorX tint = colorX.White;
         if (propertiesDictionary.TryGetValue("$envmaptint", out string currentSpecularTint))
         {
-            UniLog.Log("Specular color tint: " + currentSpecularTint);
             if (Float3Extensions.GetFloat3FromString(currentSpecularTint, out float3 hue))
             {
                 tint = new colorX(new float4(hue.x, hue.y, hue.z, 1));
@@ -455,7 +416,6 @@ public abstract class PBSSpecularParser
             }
             else
             {
-                UniLog.Error("Failed to parse float3 with " + tint);
                 return currentMaterial;
             }
         }
@@ -466,7 +426,8 @@ public abstract class PBSSpecularParser
             var specMapRaw = specMap.GetBgra32Data();
 
             // Create new specular bitmap from copying the normalmap alpha into the albedo alpha
-            var finalMap = new Bitmap2D(specMapRaw, specMap.Width, specMap.Height, TextureFormat.BGRA32, false, ColorProfile.Linear, false);
+            var finalMap = new Bitmap2D(specMapRaw, specMap.Width, specMap.Height, 
+                TextureFormat.BGRA32, false, ColorProfile.Linear, false);
 
             // Wait for the world to catch up
             await default(ToWorld);
@@ -480,63 +441,38 @@ public abstract class PBSSpecularParser
             currentMaterial.SpecularMap.Target = finalTexture;
             await default(ToBackground);
         }
-        else
-        {
-            UniLog.Error("Failed to parse float3 with " + tint);
-        }
 
         return currentMaterial;
     }
 
     private async Task<PBS_Specular> SetTextureTransforms(PBS_Specular currentMaterial, Dictionary<string, string> propertiesDictionary)
     {
-        // Apply texture transforms
-        if (propertiesDictionary.TryGetValue("$detailscale", out string currentDetailScale))
+        if (!propertiesDictionary.TryGetValue("$detailscale", out string currentDetailScale))
+            return currentMaterial;
+        
+        await default(ToWorld);
+        if (multiValueEncloseCharHashset.Any(currentDetailScale.Contains) &&
+            Float2Extensions.GetFloat2FromString(currentDetailScale, out float2 canidate))
         {
-            await default(ToWorld);
-
-            if (multiValueEncloseCharHashset.Any(currentDetailScale.Contains))
-            {
-                if (Float2Extensions.GetFloat2FromString(currentDetailScale, out float2 canidate))
-                {
-                    currentMaterial.DetailTextureScale.Value = canidate;
-                }
-            }
-            else
-            {
-                if (float.TryParse(currentDetailScale, NumberStyles.Number, CultureInfo.InvariantCulture, out float parsed))
-                {
-                    currentMaterial.DetailTextureScale.Value = new float2(parsed, parsed);
-                }
-                else
-                {
-                    UniLog.Error("Failed to parse value with " + currentDetailScale);
-                }
-            }
-
-            await default(ToBackground);
+            currentMaterial.DetailTextureScale.Value = canidate;
         }
+        else if (float.TryParse(currentDetailScale, NumberStyles.Number, CultureInfo.InvariantCulture, out float parsed))
+        {
+            currentMaterial.DetailTextureScale.Value = new float2(parsed, parsed);
+        }
+        await default(ToBackground);
 
         return currentMaterial;
     }
 
     private Bitmap2D CreateSpecularByAlphaTransfer(Bitmap2D albedo, Bitmap2D donor)
     {
-        // Check if they donor bitmaps even contain transparent pixels
         if (!donor.HasTransparentPixels())
-        {
-            // UniLog.Error("no transparent pixels");
             return albedo;
-        }
 
-        // Rescale donor bitmap to match albedo bitmap
         if (albedo.Size != donor.Size)
-        {
-            // UniLog.Log("Texture size mismatch, rescaling");
             donor = donor.GetRescaled(albedo.Size, false, false, Filtering.Lanczos3);
-        }
 
-        // Assign new pixel values to albedo alpha channel
         for (int x = 0; x < albedo.Size.x; x++)
         {
             for (int y = 0; y < albedo.Size.y; y++)
@@ -554,5 +490,4 @@ public abstract class PBSSpecularParser
 
         return albedo;
     }
-
 }

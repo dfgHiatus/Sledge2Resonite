@@ -55,10 +55,10 @@
             <HintPath>$(AppData)FrooxEngine.dll</HintPath>
         </Reference>
         <Reference Include="Sledge.Formats">
-          <HintPath>..\sledge-formats\Sledge.Formats.Texture\bin\Release\netstandard2.0\Sledge.Formats.dll</HintPath>
+          <HintPath>..\..\sledge-formats\Sledge.Formats.Texture\bin\Release\netstandard2.0\Sledge.Formats.dll</HintPath>
         </Reference>
         <Reference Include="Sledge.Formats.Texture">
-          <HintPath>..\sledge-formats\Sledge.Formats.Texture\bin\Release\netstandard2.0\Sledge.Formats.Texture.dll</HintPath>
+          <HintPath>..\..\sledge-formats\Sledge.Formats.Texture\bin\Release\netstandard2.0\Sledge.Formats.Texture.dll</HintPath>
         </Reference>
 	    <Reference Include="UnityEngine">
 		    <HintPath>$(AppData)UnityEngine.dll</HintPath>
@@ -71,6 +71,10 @@
             <HintPath>$(AppData)System.Memory.dll</HintPath>
         </Reference>
 	    <Reference Include="System" />
+    </ItemGroup>
+  
+    <ItemGroup>
+      <Folder Include="Materials\" />
     </ItemGroup>
   
     <Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(CopyToMods)'=='true'">

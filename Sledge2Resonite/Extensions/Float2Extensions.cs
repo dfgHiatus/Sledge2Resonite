@@ -11,15 +11,10 @@ public static class Float2Extensions
             return false;
         }
 
-        if (parsed.Contains("."))
-        {
-            float2 = float2.Parse(parsed, CultureInfo.InvariantCulture);
-            return true;
-        }
-        else
-        {
-            float2 = float2.Parse(Utils.DivideNumbersBy255(parsed), CultureInfo.InvariantCulture);
-            return true;
-        }
+        float2 = parsed.Contains(".")
+            ? float2.Parse(parsed, CultureInfo.InvariantCulture)
+            : float2.Parse(Utils.DivideNumbersBy255(parsed), CultureInfo.InvariantCulture);
+
+        return true;
     }
 }
